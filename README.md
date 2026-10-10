@@ -6,7 +6,17 @@ The catalog has no dates, so zzup keeps its own record: every time it runs, it d
 
 ## install
 
-Copy the `zzup` folder to `~/dust/code/` on your norns (via maiden, SMB, or `scp`), then select **zzup** from the SELECT menu.
+With your norns connected to wifi, open maiden in a browser and type this in the REPL at the bottom:
+
+```
+;install https://github.com/billwolfhub/zzup
+```
+
+Then select **zzup** from the SELECT menu.
+
+To install by hand instead, copy `zzup.lua` into a folder named `zzup` in `~/dust/code/` (via maiden, SMB, or `scp`).
+
+**If `;install` doesn't work:** it won't overwrite an existing `~/dust/code/zzup` folder, for example one left by an earlier install attempt or a manual copy. Delete that folder (in maiden's file browser, or `rm -rf ~/dust/code/zzup` over ssh) and run `;install` again.
 
 ## first run
 
