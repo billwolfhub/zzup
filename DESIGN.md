@@ -65,7 +65,8 @@ Updates are only shown for installed scripts. Updates to scripts you don't have 
 
 ## dates
 
-- The list shows the date the script was **added** to the catalog.
+- The list shows how long ago the script was **added** to the catalog, as an age: `11d`, `3w`, `4mo`, `6y`.
+- A long name on the selected row scrolls sideways, pausing at each end.
 - The details screen shows both added and last-updated dates.
 
 ## sort orders (E1)

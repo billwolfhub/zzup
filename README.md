@@ -18,14 +18,16 @@ To install by hand instead, copy `zzup.lua` into a folder named `zzup` in `~/dus
 
 ## the list
 
-Every script in the catalog is listed, plus any local scripts you have. Each row shows two marks, the date the script was added to the catalog, and its name:
+Every script in the catalog is listed, plus any local scripts you have. Each row shows two marks, how long ago the script was added to the catalog, and its name:
 
 ```
-+  26-09-30 vinker
- ! 19-10-21 mlr
- * 19-10-21 awake
- ~          my-sketch
++  11d vinker
+ ! 6y  mlr
+ * 6y  awake
+ ~     my-sketch
 ```
+
+Ages are days (`11d`), then weeks (`3w`), months (`4mo`) and years (`6y`). The details screen (K3) shows full dates. A long name on the selected row scrolls so you can read all of it.
 
 **First column**
 

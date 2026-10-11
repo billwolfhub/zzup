@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.7 @billwolf
+-- v2.8 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -64,7 +64,7 @@ local ROWS = 5
 local ROW_H = 10
 local W = 128
 -- x positions of the columns in each row
-local X_NEW, X_MARK, X_DATE, X_NAME = 0, 5, 17, 53
+local X_NEW, X_MARK, X_DATE, X_NAME = 0, 5, 17, 38
 
 -- the sort orders E1 steps through
 local SORTS = { "status", "added", "a-z", "updated", "author" }
@@ -843,10 +843,33 @@ local function wrap(text, width)
   return lines
 end
 
--- the date column: YY-MM-DD, or blank
+-- the date column: how long ago a date was, in at most four characters:
+-- "0d".."13d", then "2w".."8w", then "2mo".."11mo", then "1y" and up.
+-- months are "mo" so they can't be mistaken for the "m" (modified) mark.
+-- the full date is in the details screen.
 local function short_date(d)
-  if not d then return "" end
-  return d:sub(3)
+  local now = today()
+  local days = d and now and days_between(d, now)
+  if not days then return "" end
+  if days < 0 then days = 0 end
+  if days < 14 then return days .. "d" end
+  if days < 63 then return math.floor(days / 7) .. "w" end
+  if days < 365 then return math.max(2, math.floor(days / 30.44)) .. "mo" end
+  return math.max(1, math.floor(days / 365.25)) .. "y"
+end
+
+-- long names on the selected row scroll sideways so you can read them.
+-- the name steps forward one character at a time, pauses at each end,
+-- then starts over. MARQUEE_STEP is seconds per step; the pauses are
+-- counted in steps.
+local MARQUEE_STEP = 0.2
+local MARQUEE_PAUSE = 5
+local marquee = { row = nil, pos = 1, wait = MARQUEE_PAUSE, at_end = false }
+
+-- the name as it should appear right now, given the scroll position
+local function marquee_text(name, width)
+  local start = utf8.offset(name, marquee.pos) or 1
+  return fit(name:sub(start), width)
 end
 
 -- the header used by every screen: a title on the left, optional
@@ -945,7 +968,15 @@ local function draw_list()
     screen.move(X_DATE, y)
     screen.text(short_date(e._added))
     screen.move(X_NAME, y)
-    screen.text(fit(e.project_name, W - X_NAME))
+    if sel then
+      -- the selected row's name scrolls if it's too long (see marquee_tick)
+      if marquee.row ~= e then
+        marquee.row, marquee.pos, marquee.wait, marquee.at_end = e, 1, MARQUEE_PAUSE, false
+      end
+      screen.text(marquee_text(e.project_name, W - X_NAME))
+    else
+      screen.text(fit(e.project_name, W - X_NAME))
+    end
     ::continue::
   end
 end
@@ -1148,6 +1179,30 @@ local function add_params()
   end
 end
 
+-- one step of the scrolling name, run every MARQUEE_STEP seconds. only
+-- redraws when the selected name is too long to fit and it's time to move.
+local function marquee_tick()
+  local e = marquee.row
+  if view ~= "list" or not e or e ~= list[cursor] then return end
+  local width = W - X_NAME
+  local name = e.project_name
+  if screen.text_extents(name) <= width then return end  -- fits already
+  if marquee.wait > 0 then marquee.wait = marquee.wait - 1; return end
+  if marquee.at_end then
+    -- paused at the end long enough: back to the start
+    marquee.pos, marquee.wait, marquee.at_end = 1, MARQUEE_PAUSE, false
+  else
+    marquee.pos = marquee.pos + 1
+    local start = utf8.offset(name, marquee.pos) or #name
+    if screen.text_extents(name:sub(start)) <= width then
+      -- the rest of the name fits now: pause here before starting over
+      marquee.at_end, marquee.wait = true, MARQUEE_PAUSE
+    end
+  end
+  redraw()
+end
+local marquee_clock = nil
+
 --------------------------------------------------------------------------
 -- lifecycle: norns calls init() when the script loads and cleanup()
 -- when it's replaced or norns shuts down
@@ -1172,8 +1227,16 @@ function init()
     rebuild()
   end
   fetch()
+
+  marquee_clock = clock.run(function()
+    while true do
+      clock.sleep(MARQUEE_STEP)
+      marquee_tick()
+    end
+  end)
 end
 
 function cleanup()
+  if marquee_clock then clock.cancel(marquee_clock) end
   save_state()
 end
