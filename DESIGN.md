@@ -24,7 +24,7 @@ There are two sources, and zzup works with either one alone.
 }
 ```
 
-- `added`: the date the entry first appeared in `community.json`, taken from monome/norns-community's git history. Entries added in the 2019-10-20 bulk import really mean "2019 or earlier".
+- `added`: the date the entry first appeared in `community.json`, taken from monome/norns-community's git history. The 57 entries added in the 2019-10-21 bulk import really mean "2019 or earlier".
 - `updated` / `commit`: the latest commit on the repo's default branch, with its date. These are missing for zip-hosted entries and unreachable repos.
 
 **Local record.** `dust/data/zzup/` holds zzup's own state, including when it first saw each catalog entry, used when the dates file can't be reached, and your settings.
