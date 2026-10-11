@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.4 @billwolf
+-- v2.5 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -68,6 +68,14 @@ local X_NEW, X_MARK, X_DATE, X_NAME = 0, 5, 17, 53
 
 -- the sort orders E1 steps through
 local SORTS = { "status", "added", "a-z", "updated", "author" }
+-- how each sort order is named in the header ("sort: status, date")
+local SORT_LABELS = {
+  ["status"] = "status, date",
+  ["added"] = "added",
+  ["a-z"] = "a-z",
+  ["updated"] = "update date",
+  ["author"] = "author",
+}
 
 --------------------------------------------------------------------------
 -- state
@@ -814,14 +822,17 @@ end
 
 -- the main list. each row: new mark, install mark, date added, name.
 -- the header shows the sort order, the row count ("-*" while installed
--- scripts are hidden) and, on the right, what's busy or the counts of
--- new scripts and updates.
+-- scripts are hidden) and, on the right, what's busy, "offline", or the
+-- counts of new scripts and updates. there's only room for one of those
+-- next to the sort label, so "offline" replaces the counts.
 local function draw_list()
-  local title = settings.sort .. " " .. #list .. (settings.hide_installed and " -*" or "")
+  local title = "sort: " .. (SORT_LABELS[settings.sort] or settings.sort) .. " " .. #list ..
+    (settings.hide_installed and " -*" or "")
   local right = busy
-  if right == "" then
+  if right == "" and offline then
+    right = "offline"
+  elseif right == "" then
     local parts = {}
-    if offline then parts[#parts + 1] = "offline" end
     if counts.new > 0 then parts[#parts + 1] = "+" .. counts.new end
     if counts.upd > 0 then parts[#parts + 1] = "!" .. counts.upd end
     right = table.concat(parts, " ")

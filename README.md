@@ -41,7 +41,7 @@ Every script in the catalog is listed, plus any local scripts you have. Each row
 - `~` local only: in `dust/code` but not from the catalog. This covers your own scripts, forks, and scripts removed from the catalog.
 - blank: not installed
 
-The header shows the current sort order, the number of rows, and counts like `+3 !2` (three new to you, two updates).
+The header shows the sort order (for example `sort: status, date`), the number of rows, and counts like `+3 !2` (three new to you, two updates), or `offline` when the catalog couldn't be downloaded.
 
 ## controls
 
