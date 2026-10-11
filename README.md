@@ -27,7 +27,7 @@ Every script in the catalog is listed, plus any local scripts you have. Each row
  ~     my-sketch
 ```
 
-Ages are days (`11d`), then weeks (`3w`), months (`4mo`) and years (`6y`). The details screen (K3) shows full dates. A long name on the selected row scrolls so you can read all of it.
+Ages are days (`11d`), then weeks (`3w`), months (`4mo`) and years (`6y`). The details screen (K3) shows full dates. A long name on the selected row scrolls so you can read all of it. Scrolling relies on the norns clock; on some norns the clock doesn't run after a fresh start until a clock-based script (awake, for example) has been opened, and until then long names just end in `..`.
 
 **First column**
 
