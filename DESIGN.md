@@ -74,7 +74,7 @@ Updates are only shown for installed scripts. Updates to scripts you don't have 
 2. **date added**: newest first
 3. **A–Z**
 4. **last updated**: most recent commit first
-5. **author**
+5. **author**: each author's scripts under a dim heading with their name; the cursor skips the headings
 
 The header shows the current sort order and counts, such as `+4 !2`.
 

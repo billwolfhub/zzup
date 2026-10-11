@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.6 @billwolf
+-- v2.7 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -111,6 +111,7 @@ local detail_lines, detail_top = {}, 1  -- wrapped text for the detail screen
 local busy = ""         -- what's running in the background, shown in the header
 local offline = false   -- the last catalog download failed
 local counts = { new = 0, upd = 0 }     -- for the header
+local nscripts = 0      -- scripts in the list, not counting author headings
 
 --------------------------------------------------------------------------
 -- json decoding
@@ -627,6 +628,36 @@ end
 
 local function by_name(a, b) return a.project_name:lower() < b.project_name:lower() end
 
+-- the author view's grouping. scripts with no author listed come after
+-- the named authors, and local-only scripts come last.
+local function author_key(e)
+  if e._local then return "~~~local" end
+  local a = clean(e.author):match("^%s*(.-)%s*$")
+  if a == "" then return "~~unknown" end
+  return a:lower()
+end
+
+-- the heading shown above each author's scripts
+local function author_label(e)
+  if e._local then return "local only" end
+  local a = clean(e.author):match("^%s*(.-)%s*$")
+  if a == "" then return "no author listed" end
+  return a
+end
+
+-- the nearest selectable row to i, moving in direction dir (1 or -1)
+-- past heading rows, and turning back if that runs off the end
+local function settle(i, dir)
+  if #list == 0 then return 1 end
+  i = util.clamp(i, 1, #list)
+  local j = i
+  while list[j] and list[j]._heading do j = j + dir end
+  if list[j] then return j end
+  j = i
+  while list[j] and list[j]._heading do j = j - dir end
+  return list[j] and j or 1
+end
+
 -- newest first; rows without a date go last
 local function by_date(field)
   return function(a, b)
@@ -641,7 +672,7 @@ local sorters = {
   ["a-z"] = by_name,
   ["updated"] = by_date("_updated"),
   ["author"] = function(a, b)
-    local aa, ab = (a.author or "~"):lower(), (b.author or "~"):lower()
+    local aa, ab = author_key(a), author_key(b)
     if aa ~= ab then return aa < ab end
     return by_name(a, b)
   end,
@@ -671,11 +702,29 @@ local function rebuild()
     end
   end
   table.sort(list, sorters[settings.sort] or sorters["status"])
+  nscripts = #list
+
+  -- the author view gets a heading row above each author's scripts.
+  -- headings can't be selected: the cursor skips over them.
+  if settings.sort == "author" then
+    local grouped, last = {}, nil
+    for _, e in ipairs(list) do
+      local k = author_key(e)
+      if k ~= last then
+        grouped[#grouped + 1] = { _heading = true, project_name = author_label(e) }
+        last = k
+      end
+      grouped[#grouped + 1] = e
+    end
+    list = grouped
+  end
+
   -- put the cursor back on the script that was selected, if it's still shown
   cursor = 1
   for i, e in ipairs(list) do
     if e == selected then cursor = i; break end
   end
+  cursor = settle(cursor, 1)
 end
 
 -- run the git checks, then refresh the list with their results
@@ -826,7 +875,7 @@ end
 -- counts of new scripts and updates. there's only room for one of those
 -- next to the sort label, so "offline" replaces the counts.
 local function draw_list()
-  local title = "sort: " .. (SORT_LABELS[settings.sort] or settings.sort) .. " " .. #list ..
+  local title = "sort: " .. (SORT_LABELS[settings.sort] or settings.sort) .. " " .. nscripts ..
     (settings.hide_installed and " -*" or "")
   local right = busy
   if right == "" and offline then
@@ -857,14 +906,31 @@ local function draw_list()
     return
   end
 
-  -- scroll the window so the cursor row is always visible
+  -- scroll the window so the cursor row is always visible. in the author
+  -- view, also keep a script's author heading in view when it's the
+  -- first script of its group.
   if cursor < top then top = cursor end
   if cursor >= top + ROWS then top = cursor - ROWS + 1 end
+  if top == cursor and list[cursor - 1] and list[cursor - 1]._heading then
+    top = cursor - 1
+  end
 
   for i = 0, ROWS - 1 do
     local e = list[top + i]
     if not e then break end
     local y = 20 + i * ROW_H
+    if e._heading then
+      -- an author heading: the name, dim, followed by a faint rule
+      screen.level(6)
+      screen.move(0, y)
+      local name = fit(e.project_name, W - 12)
+      screen.text(name)
+      screen.level(2)
+      screen.move(screen.text_extents(name) + 4, y - 3)
+      screen.line(W, y - 3)
+      screen.stroke()
+      goto continue
+    end
     local sel = (top + i) == cursor
     if sel then
       screen.level(2)
@@ -880,6 +946,7 @@ local function draw_list()
     screen.text(short_date(e._added))
     screen.move(X_NAME, y)
     screen.text(fit(e.project_name, W - X_NAME))
+    ::continue::
   end
 end
 
@@ -1013,13 +1080,13 @@ function enc(n, d)
     if SORTS[i] ~= settings.sort then
       settings.sort = SORTS[i]
       rebuild()
-      cursor, top = 1, 1
+      cursor, top = settle(1, 1), 1
       save_state()
     end
   elseif #list > 0 then
-    -- E2 moves one row, E3 moves a page
+    -- E2 moves one row, E3 moves a page. author headings are skipped.
     local step = (n == 3) and ROWS or 1
-    cursor = util.clamp(cursor + d * step, 1, #list)
+    cursor = settle(cursor + d * step, d > 0 and 1 or -1)
   end
   redraw()
 end
@@ -1038,7 +1105,7 @@ function key(n, z)
       rebuild()
       top = 1
       save_state()
-    elseif n == 3 and list[cursor] then
+    elseif n == 3 and list[cursor] and not list[cursor]._heading then
       -- K3 opens details. looking at a script means it's no longer new.
       local e = list[cursor]
       build_detail(e)

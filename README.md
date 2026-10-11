@@ -53,6 +53,8 @@ The header shows the sort order (for example `sort: status, date`), the number o
 
 **Status** order (the default) puts updates and modified scripts first, then scripts new to you, then everything else, newest first.
 
+**Author** order groups each author's scripts under a heading with the author's name. Scripts with no author listed come after the named authors, and your local scripts come last.
+
 The sort order and the hide setting are remembered between runs.
 
 ## what counts as new
