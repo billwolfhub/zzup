@@ -88,7 +88,7 @@ The header shows the current sort order and counts, such as `+4 !2`.
 | K2 | hide / show installed scripts (including local-only) | back to list |
 | K3 | open details | |
 
-On the opening screen, K2 or K3 continues. The sort order and hide-installed setting are remembered between runs.
+There's no opening screen of zzup's own: the norns preview, which shows the script's header comment, is the description, and zzup opens straight on the list. The sort order and hide-installed setting are remembered between runs.
 
 ## local checks
 
