@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.3 @billwolf
+-- v2.4 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -943,7 +943,7 @@ local KEY_LINES = {
   { "*",  "installed, up to date" },
   { "!",  "update available" },
   { "m",  "modified locally" },
-  { "!m", "update + modified" },
+  { "!m", "modified + update exists" },
   { "~",  "local only" },
 }
 
