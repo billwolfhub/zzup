@@ -16,6 +16,18 @@ To install by hand instead, copy `zzup.lua` into a folder named `zzup` in `~/dus
 
 **If `;install` doesn't work:** it won't overwrite an existing `~/dust/code/zzup` folder, for example one left by an earlier install attempt or a manual copy. Delete that folder (in maiden's file browser, or `rm -rf ~/dust/code/zzup` over ssh) and run `;install` again.
 
+## updating
+
+If you installed with `;install`, type this in maiden's REPL, then relaunch zzup:
+
+```lua
+os.execute("cd /home/we/dust/code/zzup && git pull")
+```
+
+This keeps your record and settings. It only works on a git install, so it won't work on a copy made by hand; for that, delete `~/dust/code/zzup` and install again with `;install`. Avoid editing zzup's own files, or `git pull` may refuse to update.
+
+To start over completely (forget what you've seen, and reset settings), also delete `~/dust/data/zzup`.
+
 ## the list
 
 Every script in the catalog is listed, plus any local scripts you have. Each row shows two marks, how long ago the script was added to the catalog, and its name:
@@ -47,9 +59,9 @@ The header shows the sort order (for example `sort: status, date`), the number o
 
 ## controls
 
-- **E1:** sort order: status, date added, A–Z, last updated, author. Turn left past "status" for the **key**, a one-screen reference of the main marks (E1 right or K2 returns to the list). The key leaves out `?` and the header's `-*`, which are described above.
+- **E1:** sort order: status, date added, A–Z, update date, author. The header shows the current one, e.g. `sort: status, date`. Turn left past "status" for the **key**, a one-screen reference of the main marks (E1 right or K2 returns to the list). The key leaves out `?` and the header's `-*`, which are described above.
 - **E2 / E3:** scroll by row / page
-- **K2:** hide or show installed scripts. The header shows `-*` while they're hidden.
+- **K2:** hide or show installed scripts, including your local ones. The header shows `-*` while they're hidden.
 - **K3:** details: dates, author, tags, description, and what the marks mean
 - **K2 in details:** back to the list
 
