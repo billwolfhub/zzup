@@ -98,3 +98,7 @@ In the norns PARAMS menu:
 - **"Added" means added to the catalog,** which is usually close to when a script was first published. The 57 scripts added in the catalog's 2019 bulk import show "2019 or earlier".
 - **"Updated" counts any commit,** including README edits.
 - **Data location:** zzup keeps its data in `dust/data/zzup/`. `state.tsv` is your record and settings (plain text); the rest are cached downloads. Delete the folder to start over.
+
+## license
+
+GPL-3.0, the same license as norns itself. See [LICENSE](LICENSE).

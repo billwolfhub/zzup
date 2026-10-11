@@ -35,6 +35,9 @@
 --                background. nothing about them is ever uploaded.
 --
 -- see DESIGN.md in the zzup repo for the full design.
+--
+-- copyright (c) 2026 bill wolf. licensed under the GNU GPL v3.0;
+-- see LICENSE in the zzup repo.
 --------------------------------------------------------------------------
 
 local CATALOG_URL = "https://raw.githubusercontent.com/monome/norns-community/main/community.json"
