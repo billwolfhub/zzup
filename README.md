@@ -45,7 +45,7 @@ The header shows the current sort order, the number of rows, and counts like `+3
 
 ## controls
 
-- **E1:** sort order: status, date added, A–Z, last updated, author
+- **E1:** sort order: status, date added, A–Z, last updated, author. Turn left past "status" for the **key**, a reference screen listing what each mark means (E2 scrolls it; E1 right or K2 returns to the list).
 - **E2 / E3:** scroll by row / page
 - **K2:** hide or show installed scripts. The header shows `-*` while they're hidden.
 - **K3:** details: dates, author, tags, description, and what the marks mean

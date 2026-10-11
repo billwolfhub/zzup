@@ -82,7 +82,7 @@ The header shows the current sort order and counts, such as `+4 !2`.
 
 | control | list | details |
 |---|---|---|
-| E1 | change sort order | |
+| E1 | change sort order; left past "status" shows the key (a reference of the marks) | |
 | E2 | scroll one row | scroll |
 | E3 | scroll one page | scroll |
 | K2 | hide / show installed scripts (including local-only) | back to list |

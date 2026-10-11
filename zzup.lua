@@ -4,11 +4,12 @@
 -- which installed scripts
 -- have updates.
 --
--- E1 sort      E2/E3 scroll
+-- E1 sort (far left: key)
+-- E2/E3 scroll
 -- K2 hide installed
 -- K3 details
 --
--- v2.1 @billwolf
+-- v2.2 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -94,7 +95,7 @@ local checks = {}       -- folder name -> result of the git check (see run_check
 
 -- what's on screen
 local list = {}         -- the rows shown, in order
-local view = "list"     -- "list" | "detail". there's no opening screen of
+local view = "list"     -- "list" | "detail" | "key". no opening screen of
                         -- our own: the comment block at the top of this
                         -- file is what norns shows before launching.
 local cursor, top = 1, 1                -- selected row, and first visible row
@@ -933,13 +934,50 @@ local function draw_detail()
   end
 end
 
+-- the key: what each mark means. reached by turning E1 left from the
+-- first sort order; E2/E3 scroll it, and E1 right goes back to the list.
+local KEY_LINES = {
+  { "+",  "new to you" },
+  { "*",  "installed, up to date" },
+  { "!",  "update available" },
+  { "m",  "modified locally" },
+  { "!m", "update + modified" },
+  { "?",  "can't check" },
+  { "~",  "local only" },
+  { "-*", "installed hidden" },
+}
+local key_top = 1  -- first visible line of the key
+
+local function draw_key()
+  draw_header("key", "E1 > list")
+  for i = 0, ROWS - 1 do
+    local l = KEY_LINES[key_top + i]
+    if not l then break end
+    local y = 20 + i * ROW_H
+    screen.level(15)
+    screen.move(0, y)
+    screen.text(l[1])
+    screen.level(8)
+    screen.move(14, y)
+    screen.text(l[2])
+  end
+  -- a small arrow when there's more to scroll to
+  if key_top + ROWS <= #KEY_LINES then
+    screen.level(4)
+    screen.move(W, 63)
+    screen.text_right("v")
+  end
+end
+
 -- norns calls redraw() when it needs the screen; we also call it
 -- after every change
 function redraw()
   screen.clear()
   screen.font_face(1)
   screen.font_size(8)
-  if view == "detail" then draw_detail() else draw_list() end
+  if view == "detail" then draw_detail()
+  elseif view == "key" then draw_key()
+  else draw_list() end
   screen.update()
 end
 
@@ -955,10 +993,24 @@ function enc(n, d)
       local max_top = math.max(#detail_lines - ROWS + 1, 1)
       detail_top = util.clamp(detail_top + d, 1, max_top)
     end
+  elseif view == "key" then
+    if n == 1 and d > 0 then
+      -- E1 right leaves the key, back to the list
+      view = "list"
+    elseif n == 2 or n == 3 then
+      key_top = util.clamp(key_top + d, 1, math.max(#KEY_LINES - ROWS + 1, 1))
+    end
   elseif n == 1 then
-    -- E1 steps through the sort orders
+    -- E1 steps through the sort orders. turning left past the first one
+    -- shows the key.
     local i = 1
     for k, s in ipairs(SORTS) do if s == settings.sort then i = k end end
+    if d < 0 and i == 1 then
+      view = "key"
+      key_top = 1
+      redraw()
+      return
+    end
     i = util.clamp(i + (d > 0 and 1 or -1), 1, #SORTS)
     if SORTS[i] ~= settings.sort then
       settings.sort = SORTS[i]
@@ -978,7 +1030,7 @@ end
 -- K1 is left alone; norns uses it for the system menu.
 function key(n, z)
   if z ~= 1 then return end
-  if view == "detail" then
+  if view == "detail" or view == "key" then
     -- K2 goes back to the list
     if n == 2 then view = "list" end
   else
