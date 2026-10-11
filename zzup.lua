@@ -1,15 +1,14 @@
 -- zzup
--- what's new in the
--- norns community catalog?
---
--- new scripts, and updates
--- for the ones you have.
+-- shows which norns community
+-- scripts are new to you, and
+-- which installed scripts
+-- have updates.
 --
 -- E1 sort      E2/E3 scroll
 -- K2 hide installed
 -- K3 details
 --
--- v2.0 @billwolf
+-- v2.1 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -95,7 +94,9 @@ local checks = {}       -- folder name -> result of the git check (see run_check
 
 -- what's on screen
 local list = {}         -- the rows shown, in order
-local view = "intro"    -- "intro" | "list" | "detail"
+local view = "list"     -- "list" | "detail". there's no opening screen of
+                        -- our own: the comment block at the top of this
+                        -- file is what norns shows before launching.
 local cursor, top = 1, 1                -- selected row, and first visible row
 local detail_lines, detail_top = {}, 1  -- wrapped text for the detail screen
 local busy = ""         -- what's running in the background, shown in the header
@@ -810,24 +811,6 @@ end
 -- screens
 --------------------------------------------------------------------------
 
--- opening screen: what the script does. the catalog downloads in the
--- background while this is showing, so the list is ready on K3.
-local INTRO = "shows which norns community scripts are new to you, " ..
-  "and which of your installed scripts have updates."
-
-local function draw_intro()
-  draw_header("zzup", busy)
-  screen.level(10)
-  local lines = wrap(INTRO, W - 2)
-  for i = 1, math.min(#lines, 5) do
-    screen.move(0, 10 + i * 9)
-    screen.text(lines[i])
-  end
-  screen.level(4)
-  screen.move(0, 63)
-  screen.text("K3 continue")
-end
-
 -- the main list. each row: new mark, install mark, date added, name.
 -- the header shows the sort order, the row count ("-*" while installed
 -- scripts are hidden) and, on the right, what's busy or the counts of
@@ -956,9 +939,7 @@ function redraw()
   screen.clear()
   screen.font_face(1)
   screen.font_size(8)
-  if view == "intro" then draw_intro()
-  elseif view == "detail" then draw_detail()
-  else draw_list() end
+  if view == "detail" then draw_detail() else draw_list() end
   screen.update()
 end
 
@@ -968,7 +949,6 @@ end
 
 -- encoders: n is which encoder (1-3), d is the direction/amount turned
 function enc(n, d)
-  if view == "intro" then return end
   if view == "detail" then
     -- E2/E3 scroll a long description
     if n == 2 or n == 3 then
@@ -998,10 +978,7 @@ end
 -- K1 is left alone; norns uses it for the system menu.
 function key(n, z)
   if z ~= 1 then return end
-  if view == "intro" then
-    -- K2 or K3 leaves the opening screen
-    if n == 2 or n == 3 then view = "list" end
-  elseif view == "detail" then
+  if view == "detail" then
     -- K2 goes back to the list
     if n == 2 then view = "list" end
   else
