@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.2 @billwolf
+-- v2.3 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -934,38 +934,30 @@ local function draw_detail()
   end
 end
 
--- the key: what each mark means. reached by turning E1 left from the
--- first sort order; E2/E3 scroll it, and E1 right goes back to the list.
+-- the key: what each mark means, on one screen. reached by turning E1
+-- left from the first sort order; E1 right or K2 goes back to the list.
+-- "?" (can't check) and the header's "-*" (installed hidden) are left
+-- out to keep it to one screen; the README explains them.
 local KEY_LINES = {
   { "+",  "new to you" },
   { "*",  "installed, up to date" },
   { "!",  "update available" },
   { "m",  "modified locally" },
   { "!m", "update + modified" },
-  { "?",  "can't check" },
   { "~",  "local only" },
-  { "-*", "installed hidden" },
 }
-local key_top = 1  -- first visible line of the key
 
 local function draw_key()
   draw_header("key", "E1 > list")
-  for i = 0, ROWS - 1 do
-    local l = KEY_LINES[key_top + i]
-    if not l then break end
-    local y = 20 + i * ROW_H
+  -- six lines at 9 pixels apart fit below the header
+  for i, l in ipairs(KEY_LINES) do
+    local y = 9 + i * 9
     screen.level(15)
     screen.move(0, y)
     screen.text(l[1])
     screen.level(8)
     screen.move(14, y)
     screen.text(l[2])
-  end
-  -- a small arrow when there's more to scroll to
-  if key_top + ROWS <= #KEY_LINES then
-    screen.level(4)
-    screen.move(W, 63)
-    screen.text_right("v")
   end
 end
 
@@ -994,12 +986,8 @@ function enc(n, d)
       detail_top = util.clamp(detail_top + d, 1, max_top)
     end
   elseif view == "key" then
-    if n == 1 and d > 0 then
-      -- E1 right leaves the key, back to the list
-      view = "list"
-    elseif n == 2 or n == 3 then
-      key_top = util.clamp(key_top + d, 1, math.max(#KEY_LINES - ROWS + 1, 1))
-    end
+    -- E1 right leaves the key, back to the list
+    if n == 1 and d > 0 then view = "list" end
   elseif n == 1 then
     -- E1 steps through the sort orders. turning left past the first one
     -- shows the key.
@@ -1007,7 +995,6 @@ function enc(n, d)
     for k, s in ipairs(SORTS) do if s == settings.sort then i = k end end
     if d < 0 and i == 1 then
       view = "key"
-      key_top = 1
       redraw()
       return
     end
