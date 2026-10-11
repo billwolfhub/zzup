@@ -1,88 +1,113 @@
 -- zzup
--- which catalog scripts are
--- new to this norns?
+-- what's new in the
+-- norns community catalog?
 --
--- tracks the community catalog
--- and remembers the date each
--- script first appeared here.
+-- new scripts, and updates
+-- for the ones you have.
 --
--- E2 scroll   E3 page
--- K3 details  K2 back / filter
--- hold K2: hide installed
+-- E1 sort      E2/E3 scroll
+-- K2 hide installed
+-- K3 details
 --
--- v1.2 @billwolf
+-- v2.0 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
 --
--- the norns community catalog lists every published script, but it has
--- no dates, so there's no way to tell new scripts from old ones. this
--- script keeps its own record instead:
+-- zzup lists every script in the norns community catalog and marks:
 --
---   1. download the current catalog (in the background)
---   2. compare it with the list of scripts this norns has already seen
---   3. stamp anything new with today's date and save the record
---   4. show the dated (new) scripts first, newest at the top
+--   +   scripts that are new to you (added since your last visit)
+--   *   installed and up to date
+--   !   installed, and a newer version has been published
+--   m   installed, and modified locally (edits or your own commits)
+--   ?   installed, but can't be checked (not a git install, or the
+--       repo can't be reached)
+--   ~   local only: in dust/code but not from the catalog
 --
--- the very first run has no history to compare against, so it scans
--- dust/code instead: scripts already installed become the undated
--- "baseline", and everything else is marked new as of that day.
+-- where the information comes from:
+--
+--   catalog      monome's community.json: names, authors, descriptions
+--   dates.json   a daily-updated file (billwolfhub/zzup-data) with the
+--                date each script was added to the catalog and the
+--                latest commit on its repo. optional: without it, zzup
+--                falls back to dates it records itself.
+--   your norns   installed scripts are checked with git, locally, in the
+--                background. nothing about them is ever uploaded.
+--
+-- see DESIGN.md in the zzup repo for the full design.
 --------------------------------------------------------------------------
 
--- where the catalog comes from. this is the same file maiden's project
--- manager uses for its "community" catalog.
 local CATALOG_URL = "https://raw.githubusercontent.com/monome/norns-community/main/community.json"
+local DEFAULT_DATES_URL = "https://raw.githubusercontent.com/billwolfhub/zzup-data/main/dates.json"
 
 -- files this script keeps in dust/data/zzup/
-local DATA_DIR     = _path.data .. "zzup/"
-local SEEN_FILE    = DATA_DIR .. "seen.tsv"          -- first-seen record (plain text)
-local CACHE_FILE   = DATA_DIR .. "catalog.json"      -- last good download, for offline use
-local TMP_FILE     = DATA_DIR .. "catalog.download"  -- download in progress
+local DATA_DIR      = _path.data .. "zzup/"
+local STATE_FILE    = DATA_DIR .. "state.tsv"       -- your record and settings (plain text)
+local CATALOG_CACHE = DATA_DIR .. "catalog.json"    -- last good catalog download
+local DATES_CACHE   = DATA_DIR .. "dates.json"      -- last good dates.json download
+local CHECK_SCRIPT  = DATA_DIR .. "check.sh"        -- the git checks, written fresh each run
+local OLD_SEEN_FILE = DATA_DIR .. "seen.tsv"        -- zzup v1's record, imported once
 
 -- maiden saves its own copies of the catalogs here; used as a fallback
 -- when we're offline and have never downloaded a catalog ourselves
-local MAIDEN_CATS  = _path.data .. "catalogs/"
+local MAIDEN_CATS   = _path.data .. "catalogs/"
+
+local NEW_FIRST_RUN_DAYS = 30   -- first run: "new" = added in the last 30 days
+local NEW_EXPIRY_DAYS    = 14   -- a "new" mark clears itself after two weeks
+local DATES_MAX_AGE      = 6 * 3600  -- re-download dates.json at most every 6 hours
+local BULK_IMPORT_DATE   = "2019-10-21"  -- the catalog's 2019 bulk import:
+                                         -- "added" really means 2019 or earlier
 
 -- screen layout: norns is 128x64. a header line on top, then ROWS
--- lines of text spaced ROW_H pixels apart.
+-- rows of text spaced ROW_H pixels apart.
 local ROWS = 5
 local ROW_H = 10
 local W = 128
+-- x positions of the columns in each row
+local X_NEW, X_MARK, X_DATE, X_NAME = 0, 5, 17, 53
 
--- how long K2 must be held (seconds) to count as a long press
-local HOLD_TIME = 0.5
+-- the sort orders E1 steps through
+local SORTS = { "status", "added", "a-z", "updated", "author" }
 
 --------------------------------------------------------------------------
 -- state
 --------------------------------------------------------------------------
 
-local seen = nil        -- project name -> "YYYY-MM-DD" (first seen),
-                        -- "" for baseline entries, "?" if the clock was unset.
+-- your record, saved in state.tsv
+local seen = nil        -- project name -> date first seen ("YYYY-MM-DD").
                         -- nil until the first catalog has been recorded.
-local first_scan = {}   -- names marked new by the first-run scan (not installed then).
-                        -- they sort below scripts that genuinely appeared later.
-local meta = {}         -- extra values stored in seen.tsv: baseline date, last check
-local entries = {}      -- the current catalog: a list of entry tables
-local list = {}         -- the entries shown on screen under the current filter
-local filter = "new"    -- "new" shows dated entries only; "all" adds the baseline
-local hide_installed = false  -- leave installed scripts out of the list (hold K2);
-                              -- saved in seen.tsv so it sticks between runs
-local view = "intro"    -- which screen is showing: "intro" | "list" | "detail"
+local newmark = {}      -- project name -> date it was marked new to you;
+                        -- absent once cleared
+local settings = {      -- remembered between runs
+  sort = "status",
+  hide_installed = false,
+  dates_on = true,
+  dates_url = DEFAULT_DATES_URL,
+  dates_fetched = 0,    -- os.time() of the last good dates.json download
+}
+
+-- data loaded this run
+local entries = {}      -- catalog entries (decoded tables), plus local-only rows
+local catalog = {}      -- the catalog entries alone
+local dates = nil       -- dates.json "scripts" table, or nil if unavailable
+local folders = {}      -- folder name -> true, for every folder in dust/code
+local checks = {}       -- folder name -> result of the git check (see run_checks)
+
+-- what's on screen
+local list = {}         -- the rows shown, in order
+local view = "intro"    -- "intro" | "list" | "detail"
 local cursor, top = 1, 1                -- selected row, and first visible row
 local detail_lines, detail_top = {}, 1  -- wrapped text for the detail screen
-local status = ""       -- short message in the header ("checking...", "+2 today")
-local latest = nil      -- the most recent first-seen date; those rows draw brightest
-local fetching = false  -- true while a download is running
-local k2_clock = nil    -- timer running while K2 is held, to detect a long press
-local k2_down = false   -- K2 was pressed while the list was showing
-local k2_long = false   -- the current K2 press already counted as a long press
+local busy = ""         -- what's running in the background, shown in the header
+local offline = false   -- the last catalog download failed
+local counts = { new = 0, upd = 0 }     -- for the header
 
 --------------------------------------------------------------------------
 -- json decoding
 --
 -- norns doesn't ship a json library, so this is a small decoder that
--- handles everything the catalog uses: objects, arrays, strings (with
--- escapes, including \uXXXX), numbers, true/false/null.
+-- handles everything the catalog and dates.json use: objects, arrays,
+-- strings (with escapes, including \uXXXX), numbers, true/false/null.
 -- returns the decoded value, or nil plus an error message.
 --------------------------------------------------------------------------
 
@@ -192,7 +217,7 @@ local function json_decode(s)
 end
 
 --------------------------------------------------------------------------
--- files
+-- small helpers
 --------------------------------------------------------------------------
 
 -- the whole contents of a file, or nil if it doesn't exist
@@ -204,74 +229,121 @@ local function read_file(path)
   return s
 end
 
+-- write a file safely: to a temporary file first, then rename it into
+-- place, so a crash or power loss can't leave a half-written file
+local function write_file(path, text)
+  local tmp = path .. ".tmp"
+  local f = io.open(tmp, "w")
+  if not f then print("zzup: can't write " .. tmp); return false end
+  f:write(text)
+  f:close()
+  os.rename(tmp, path)
+  return true
+end
+
 -- turn tabs and newlines into spaces, so text can't break the
--- one-script-per-line format of seen.tsv or the screen layout
+-- one-script-per-line format of state.tsv or the screen layout
 local function clean(s)
   return (tostring(s or ""):gsub("[\t\r\n]", " "))
 end
 
--- today's date as YYYY-MM-DD
+-- quote a string for the shell: 'it'\''s' style
+local function shq(s)
+  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+-- today's date as YYYY-MM-DD, or nil if the clock isn't set.
+-- norns has no battery-backed clock; until it syncs time over the
+-- network it can report a date around 1970.
 local function today()
   local d = os.date("%Y-%m-%d")
-  -- norns has no battery-backed clock; until it syncs time over the
-  -- network it can report a date around 1970. record "?" instead of
-  -- a wrong date in that case.
-  if tonumber(d:sub(1, 4)) < 2020 then return "?" end
+  if tonumber(d:sub(1, 4)) < 2020 then return nil end
   return d
 end
 
--- read seen.tsv into a table of name -> date.
--- format: lines starting with "#" hold settings ("# baseline 2026-10-10"),
--- every other line is "<project name><tab><date>" (date empty for baseline),
--- optionally followed by "<tab>first" for entries from the first-run scan.
--- returns nil if the file doesn't exist yet (i.e. this is the first run).
-local function load_seen()
-  local s = read_file(SEEN_FILE)
-  if not s then return nil end
-  local t = {}
-  meta = {}
-  first_scan = {}
-  for line in s:gmatch("[^\n]+") do
-    local k, v = line:match("^#%s*(%S+)%s*(.*)$")
-    if k then
-      meta[k] = v
-    else
-      local name, date, flag = line:match("^([^\t]+)\t([^\t]*)\t?(.*)$")
-      if name then
-        t[name] = date
-        if flag == "first" then first_scan[name] = true end
-      end
-    end
+-- days from date a to date b (both YYYY-MM-DD), or nil if either is bad
+local function days_between(a, b)
+  local function t(d)
+    local y, m, dd = tostring(d):match("^(%d+)-(%d+)-(%d+)$")
+    if not y then return nil end
+    return os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(dd), hour = 12 })
   end
-  return t
-end
-
--- write the seen table back to seen.tsv, sorted by name.
--- writes to a temporary file first and then renames it, so a crash or
--- power loss mid-write can't leave a half-written record behind.
-local function save_seen()
-  local names = {}
-  for name in pairs(seen) do names[#names + 1] = name end
-  table.sort(names)
-  local out = {
-    "# zzup 1",
-    "# baseline " .. (meta.baseline or ""),
-    "# checked " .. (meta.checked or ""),
-    "# hide_installed " .. (hide_installed and "1" or "0"),
-  }
-  for _, name in ipairs(names) do
-    out[#out + 1] = name .. "\t" .. seen[name] .. (first_scan[name] and "\tfirst" or "")
-  end
-  local tmp = SEEN_FILE .. ".tmp"
-  local f = io.open(tmp, "w")
-  if not f then print("zzup: can't write " .. tmp); return end
-  f:write(table.concat(out, "\n"), "\n")
-  f:close()
-  os.rename(tmp, SEEN_FILE)
+  local ta, tb = t(a), t(b)
+  if not ta or not tb then return nil end
+  return math.floor((tb - ta) / 86400 + 0.5)
 end
 
 --------------------------------------------------------------------------
--- catalog
+-- your record: state.tsv
+--
+-- lines starting with "#" hold settings ("# sort status"); every other
+-- line is "<project name><tab><first seen><tab><marked new>". first seen
+-- is empty for scripts already in the catalog on zzup's first run (there's
+-- no meaningful local date for those), and marked new is empty once the
+-- script is no longer new to you.
+--------------------------------------------------------------------------
+
+local function load_state()
+  local s = read_file(STATE_FILE)
+  if not s then return false end
+  seen, newmark = {}, {}
+  for line in s:gmatch("[^\n]+") do
+    local k, v = line:match("^#%s*(%S+)%s*(.*)$")
+    if k then
+      if k == "sort" then settings.sort = v
+      elseif k == "hide_installed" then settings.hide_installed = (v == "1")
+      elseif k == "dates_on" then settings.dates_on = (v ~= "0")
+      elseif k == "dates_url" and v ~= "" then settings.dates_url = v
+      elseif k == "dates_fetched" then settings.dates_fetched = tonumber(v) or 0
+      end
+    else
+      local name, first, nw = line:match("^([^\t]+)\t([^\t]*)\t?([^\t]*)")
+      if name then
+        seen[name] = first
+        if nw ~= "" then newmark[name] = nw end
+      end
+    end
+  end
+  return true
+end
+
+local function save_state()
+  local out = {
+    "# zzup 2",
+    "# sort " .. settings.sort,
+    "# hide_installed " .. (settings.hide_installed and "1" or "0"),
+    "# dates_on " .. (settings.dates_on and "1" or "0"),
+    "# dates_url " .. settings.dates_url,
+    "# dates_fetched " .. string.format("%d", settings.dates_fetched),
+  }
+  if seen then
+    local names = {}
+    for name in pairs(seen) do names[#names + 1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do
+      out[#out + 1] = name .. "\t" .. seen[name] .. "\t" .. (newmark[name] or "")
+    end
+  end
+  write_file(STATE_FILE, table.concat(out, "\n") .. "\n")
+end
+
+-- zzup v1 kept seen.tsv. if that's all there is, carry its names over
+-- (as already seen, nothing new) so upgrading doesn't count as a first run
+local function import_v1()
+  local s = read_file(OLD_SEEN_FILE)
+  if not s then return false end
+  seen, newmark = {}, {}
+  for line in s:gmatch("[^\n]+") do
+    local name, d, flag = line:match("^([^#\t][^\t]*)\t([^\t]*)\t?(.*)$")
+    -- v1's first-scan entries were dated the day of its first run, which
+    -- says nothing about them, so they become undated like the rest
+    if name then seen[name] = (flag == "first") and "" or d end
+  end
+  return true
+end
+
+--------------------------------------------------------------------------
+-- catalog and dates
 --------------------------------------------------------------------------
 
 -- decode catalog json into a list of entries. each entry is a table with
@@ -291,20 +363,29 @@ local function decode_catalog(text)
       out[#out + 1] = e
     end
   end
+  if #out == 0 then return nil end
   return out
 end
 
+-- decode dates.json; returns its "scripts" table, or nil
+local function decode_dates(text)
+  if not text or #text == 0 then return nil end
+  local d = json_decode(text)
+  if type(d) ~= "table" or d.version ~= 1 or type(d.scripts) ~= "table" then
+    return nil
+  end
+  return d.scripts
+end
+
 -- offline fallback: read every *.json catalog maiden has saved in
--- dust/data/catalogs and merge them, skipping duplicate project names.
--- returns nil if there's nothing usable.
+-- dust/data/catalogs and merge them, skipping duplicate project names
 local function load_maiden_catalogs()
   local ok, files = pcall(util.scandir, MAIDEN_CATS)
   if not ok or not files then return nil end
   local merged, have = {}, {}
   for _, f in ipairs(files) do
     if f:match("%.json$") then
-      local es = decode_catalog(read_file(MAIDEN_CATS .. f))
-      for _, e in ipairs(es or {}) do
+      for _, e in ipairs(decode_catalog(read_file(MAIDEN_CATS .. f)) or {}) do
         if not have[e.project_name] then
           have[e.project_name] = true
           merged[#merged + 1] = e
@@ -316,194 +397,357 @@ local function load_maiden_catalogs()
   return merged
 end
 
--- the repository name from a github url, e.g.
--- "https://github.com/tehn/awake.git" -> "awake".
--- a script's install folder usually matches either this or its project name.
+-- "owner/repo" from a github url, lowercased, or nil.
+-- handles https and ssh forms, ".git", and links into subfolders or
+-- files ("/tree/main", "/blob/main/x.lua", release zips).
+local function github_id(url)
+  url = tostring(url or "")
+  local owner, repo = url:match("github%.com[/:]([^/]+)/([^/%?#]+)")
+  if not owner then return nil end
+  repo = repo:gsub("%.git$", "")
+  return (owner .. "/" .. repo):lower()
+end
+
+-- the repo name from a catalog entry's url: a script installed with
+-- ;install usually lives in a folder with this name
 local function repo_name(e)
-  local url = e.project_url or ""
-  local name = url:match("github%.com/[^/]+/([^/%?#]+)")
-  if name then name = name:gsub("%.git$", "") end
-  return name
+  local id = github_id(e.project_url)
+  if not id then return nil end
+  -- keep the original capitalization for the folder name
+  local _, repo = tostring(e.project_url):match("github%.com/([^/]+)/([^/%?#]+)")
+  return repo and (repo:gsub("%.git$", "")) or nil
 end
 
--- true if the script appears to be installed in dust/code
-local function installed(e)
-  if util.file_exists(_path.code .. e.project_name) then return true end
+--------------------------------------------------------------------------
+-- installed scripts
+--------------------------------------------------------------------------
+
+-- every folder in dust/code (util.scandir marks folders with a "/")
+local function scan_folders()
+  folders = {}
+  local ok, files = pcall(util.scandir, _path.code)
+  if not ok or not files then return end
+  for _, f in ipairs(files) do
+    local name = f:match("^(.-)/$")
+    if name and name ~= "" then folders[name] = true end
+  end
+end
+
+-- the dust/code folder a catalog entry is installed in, or nil.
+-- maiden's catalog installs use the project name; ;install uses the
+-- repo name. either counts.
+local function install_folder(e)
+  if folders[e.project_name] then return e.project_name end
   local r = repo_name(e)
-  return r ~= nil and util.file_exists(_path.code .. r)
+  if r and folders[r] then return r end
+  return nil
 end
 
---------------------------------------------------------------------------
--- tracking: compare a catalog with what we've seen, and record new entries
---------------------------------------------------------------------------
+-- the published commit for a catalog entry, from dates.json
+local function published_commit(e)
+  local d = dates and dates[e.project_name]
+  return d and d.commit or nil
+end
 
--- record first-seen dates for anything new in the catalog `es`.
--- returns: how many entries were new, and whether this was the first run.
-local function track(es)
-  local fresh = 0
-  local d = today()
-  if seen == nil then
-    -- first run: there's no history to compare against, so use what's
-    -- installed instead. scripts already in dust/code are clearly known,
-    -- so they become the undated baseline. everything else is new to
-    -- this norns and gets today's date. scripts that appear in later
-    -- runs get later dates, so they still sort above this first batch.
-    seen = {}
-    for _, e in ipairs(es) do
-      if installed(e) then
-        seen[e.project_name] = ""
-      else
-        seen[e.project_name] = d
-        first_scan[e.project_name] = true
-        fresh = fresh + 1
+-- the install mark for an entry, from its git check:
+--   "" not installed, "*" up to date, "!" update available,
+--   "m" modified locally, "!m" both, "?" can't check, "~" local only
+-- marks start as "*" (or "~") and are refined once the checks finish.
+local function install_mark(e)
+  if e._local then return "~" end
+  local folder = e._folder
+  if not folder then return "" end
+  local c = checks[folder]
+  if not c then return "*" end              -- not checked yet
+  if c.kind == "nogit" then return "?" end  -- copied by hand
+  -- a folder whose git origin isn't this entry's repo is someone else's
+  -- copy (a fork, or your own script with the same name)
+  local want = github_id(e.project_url)
+  if not want or github_id(c.origin) ~= want then return "~" end
+  if not published_commit(e) then return "?" end  -- nothing to compare with
+  local modified = c.dirty or c.ahead > 0 or c.cstate == "anc"
+  local behind = (c.cstate == "nanc" or c.cstate == "missing")
+  if behind and modified then return "!m" end
+  if behind then return "!" end
+  if modified then return "m" end
+  return "*"
+end
+
+-- write and run the git checks for every installed catalog script, in
+-- the background. for each folder this records where its git origin
+-- points, whether it has uncommitted edits or unpushed commits, and how
+-- its HEAD relates to the published commit:
+--   eq       HEAD is the published commit
+--   anc      the published commit is in your history: you're ahead
+--   nanc     you have the published commit but HEAD doesn't contain it
+--   missing  you don't have the published commit: you're behind
+--   none     no published commit to compare with
+-- no network is used: these are all local git commands.
+local function run_checks(done)
+  local lines = { "cd " .. shq(_path.code) .. " || exit 0" }
+  local n = 0
+  for _, e in ipairs(catalog) do
+    local folder = e._folder
+    if folder then
+      n = n + 1
+      local c = published_commit(e) or ""
+      local d = shq(folder)
+      lines[#lines + 1] = table.concat({
+        "d=" .. d .. "; C=" .. shq(c),
+        'if [ -e "$d/.git" ]; then',
+        '  o=$(git -C "$d" config --get remote.origin.url 2>/dev/null)',
+        '  h=$(git -C "$d" rev-parse HEAD 2>/dev/null)',
+        '  x=0; [ -n "$(git -C "$d" status --porcelain --untracked-files=no 2>/dev/null)" ] && x=1',
+        '  a=$(git -C "$d" rev-list --count "@{u}..HEAD" 2>/dev/null); [ -n "$a" ] || a=0',
+        '  c=none',
+        '  if [ -n "$C" ]; then',
+        '    if [ "$h" = "$C" ]; then c=eq',
+        '    elif git -C "$d" cat-file -e "$C^{commit}" 2>/dev/null; then',
+        '      if git -C "$d" merge-base --is-ancestor "$C" HEAD 2>/dev/null; then c=anc; else c=nanc; fi',
+        '    else c=missing; fi',
+        '  fi',
+        '  printf "R\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$d" "$o" "$x" "$a" "$c"',
+        'else printf "N\\t%s\\n" "$d"; fi',
+      }, "\n")
+    end
+  end
+  if n == 0 then checks = {}; done(); return end
+  write_file(CHECK_SCRIPT, table.concat(lines, "\n") .. "\n")
+
+  local function parse(output)
+    checks = {}
+    for line in (output or ""):gmatch("[^\n]+") do
+      local kind, rest = line:match("^(%u)\t(.*)$")
+      if kind == "N" then
+        checks[rest] = { kind = "nogit" }
+      elseif kind == "R" then
+        local folder, origin, x, a, c = rest:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)$")
+        if folder then
+          checks[folder] = { kind = "git", origin = origin, dirty = (x == "1"),
+            ahead = tonumber(a) or 0, cstate = c }
+        end
       end
     end
-    meta.baseline = d
-    meta.checked = d
-    save_seen()
-    return fresh, true
+    done()
   end
-  -- later runs: any name we haven't seen before is new as of today.
-  -- names we've already seen keep their original date.
-  for _, e in ipairs(es) do
-    if seen[e.project_name] == nil then
-      seen[e.project_name] = d
-      fresh = fresh + 1
-    end
-  end
-  meta.checked = d
-  save_seen()
-  return fresh, false
-end
 
--- how an entry ranks in the list: scripts that appeared after the first
--- scan (2) come first, then the first scan's not-installed scripts (1),
--- then the installed baseline (0)
-local function rank(e)
-  if e._seen == "" then return 0 end
-  if first_scan[e.project_name] then return 1 end
-  return 2
-end
-
--- rebuild the on-screen list from `entries` and the seen record.
--- dated entries come first: genuinely new ones above the first scan's,
--- each group newest date first, then alphabetical. baseline entries
--- follow alphabetically, but only in the "all" filter.
--- installed scripts are left out entirely when hide_installed is on.
--- auto = true picks the filter automatically: "new" if there's anything
--- dated, otherwise "all" (used when a catalog loads, not on K2 toggles).
-local function rebuild(auto)
-  latest = nil
-  local dated, base = {}, {}
-  for _, e in ipairs(entries) do
-    local d = seen and seen[e.project_name] or ""
-    -- cache the date and installed state on the entry, so sorting and
-    -- drawing don't have to look them up again
-    e._seen = d
-    e._inst = installed(e)
-    if hide_installed and e._inst then
-      -- skip it
-    elseif d ~= "" then
-      dated[#dated + 1] = e
-      -- only genuinely new scripts count toward the bright "latest" batch
-      if d ~= "?" and not first_scan[e.project_name]
-        and (latest == nil or d > latest) then latest = d end
-    else
-      base[#base + 1] = e
-    end
-  end
-  -- YYYY-MM-DD strings sort correctly as plain text
-  table.sort(dated, function(a, b)
-    local ra, rb = rank(a), rank(b)
-    if ra ~= rb then return ra > rb end
-    if a._seen ~= b._seen then return a._seen > b._seen end
-    return a.project_name:lower() < b.project_name:lower()
-  end)
-  table.sort(base, function(a, b)
-    return a.project_name:lower() < b.project_name:lower()
-  end)
-
-  if auto then filter = (#dated > 0) and "new" or "all" end
-  list = {}
-  for _, e in ipairs(dated) do list[#list + 1] = e end
-  if filter == "all" then
-    for _, e in ipairs(base) do list[#list + 1] = e end
-  end
-  -- keep the cursor on a valid row if the list got shorter
-  cursor = util.clamp(cursor, 1, math.max(#list, 1))
-  top = util.clamp(top, 1, math.max(cursor, 1))
-end
-
--- make `es` the current catalog: record anything new, rebuild the list,
--- and set the header status message.
--- offline = true when the catalog came from a local copy, not the network.
-local function use(es, offline)
-  entries = es
-  local fresh, first = track(es)
-  cursor, top = 1, 1
-  rebuild(true)
-  if first then
-    status = "first scan"
-  elseif fresh > 0 then
-    status = "+" .. fresh .. " today"
+  local cmd = "sh " .. shq(CHECK_SCRIPT)
+  if norns and norns.system_cmd then
+    norns.system_cmd(cmd, parse)
   else
-    status = "up to date"
+    parse(util.os_capture(cmd, true))
   end
-  if offline then status = "offline" end
+end
+
+--------------------------------------------------------------------------
+-- tracking what's new to you
+--------------------------------------------------------------------------
+
+-- the date an entry was added to the catalog: from dates.json if we
+-- have it, otherwise the date this norns first saw it. scripts that were
+-- already in the catalog on zzup's first run have no date that way.
+local function added_date(e)
+  local d = dates and dates[e.project_name]
+  if d and d.added then return d.added end
+  local s = seen and seen[e.project_name]
+  if not s or s == "" then return nil end
+  return s
+end
+
+-- record the catalog against your record: anything not seen before is
+-- new to you. on the very first run, "new" is anything added to the
+-- catalog in the last NEW_FIRST_RUN_DAYS days (needs dates.json).
+local function track()
+  local d = today()
+  if not d then return end  -- clock not set: try again next time
+  local first = (seen == nil)
+  if first then seen, newmark = {}, {} end
+  for _, e in ipairs(catalog) do
+    local name = e.project_name
+    if seen[name] == nil then
+      seen[name] = first and "" or d
+      if first then
+        local added = dates and dates[name] and dates[name].added
+        local age = added and days_between(added, d)
+        if age and age <= NEW_FIRST_RUN_DAYS then newmark[name] = d end
+      else
+        newmark[name] = d
+      end
+    end
+  end
+  -- "new" marks clear themselves after NEW_EXPIRY_DAYS
+  for name, marked in pairs(newmark) do
+    local age = days_between(marked, d)
+    if age and age > NEW_EXPIRY_DAYS then newmark[name] = nil end
+  end
+  save_state()
+end
+
+--------------------------------------------------------------------------
+-- building the list
+--------------------------------------------------------------------------
+
+-- combine the catalog with local-only folders, and work out each row's
+-- folder, marks and dates
+local function assemble()
+  entries = {}
+  local claimed = {}
+  for _, e in ipairs(catalog) do
+    e._folder = install_folder(e)
+    if e._folder then claimed[e._folder] = true end
+    entries[#entries + 1] = e
+  end
+  -- folders no catalog entry claims are local-only rows
+  for folder in pairs(folders) do
+    if not claimed[folder] then
+      entries[#entries + 1] = { project_name = folder, _local = true, _folder = folder,
+        -- it was in the catalog once if it's in your record
+        _removed = seen and seen[folder] ~= nil }
+    end
+  end
+end
+
+-- the group a row belongs to in the "status" sort: things to act on first
+local function status_group(e)
+  if e._mark == "!" or e._mark == "!m" then return 0 end
+  if e._mark == "m" then return 1 end
+  if e._new then return 2 end
+  return 3
+end
+
+local function by_name(a, b) return a.project_name:lower() < b.project_name:lower() end
+
+-- newest first; rows without a date go last
+local function by_date(field)
+  return function(a, b)
+    local da, db = a[field] or "", b[field] or ""
+    if da ~= db then return da > db end
+    return by_name(a, b)
+  end
+end
+
+local sorters = {
+  ["added"] = by_date("_added"),
+  ["a-z"] = by_name,
+  ["updated"] = by_date("_updated"),
+  ["author"] = function(a, b)
+    local aa, ab = (a.author or "~"):lower(), (b.author or "~"):lower()
+    if aa ~= ab then return aa < ab end
+    return by_name(a, b)
+  end,
+  ["status"] = function(a, b)
+    local ga, gb = status_group(a), status_group(b)
+    if ga ~= gb then return ga < gb end
+    return by_date("_added")(a, b)
+  end,
+}
+
+-- rebuild the on-screen list: refresh each row's marks, apply the hide
+-- installed setting, sort, and keep the cursor on the same script
+local function rebuild()
+  local selected = list[cursor]
+  counts = { new = 0, upd = 0 }
+  list = {}
+  for _, e in ipairs(entries) do
+    e._mark = install_mark(e)
+    e._new = (not e._local) and newmark[e.project_name] ~= nil
+    e._added = (not e._local) and added_date(e) or nil
+    local d = dates and dates[e.project_name]
+    e._updated = (not e._local) and d and d.updated or nil
+    if e._new then counts.new = counts.new + 1 end
+    if e._mark:sub(1, 1) == "!" then counts.upd = counts.upd + 1 end
+    if not (settings.hide_installed and e._mark ~= "") then
+      list[#list + 1] = e
+    end
+  end
+  table.sort(list, sorters[settings.sort] or sorters["status"])
+  -- put the cursor back on the script that was selected, if it's still shown
+  cursor = 1
+  for i, e in ipairs(list) do
+    if e == selected then cursor = i; break end
+  end
+end
+
+-- run the git checks, then refresh the list with their results
+local function check_installed()
+  busy = "checking"
+  redraw()
+  run_checks(function()
+    busy = ""
+    rebuild()
+    redraw()
+  end)
+end
+
+-- start using a catalog: record what's new, then build the list
+local function use_catalog(es)
+  catalog = es
+  scan_folders()
+  track()
+  assemble()
+  rebuild()
 end
 
 --------------------------------------------------------------------------
 -- download
 --------------------------------------------------------------------------
 
--- called when curl finishes. `output` is whatever the command printed;
--- the command only prints ZZUP_OK if curl succeeded.
-local function finish_download(output)
-  fetching = false
-  local text = nil
-  if output and output:find("ZZUP_OK", 1, true) then
-    text = read_file(TMP_FILE)
-  end
-  local es = decode_catalog(text)
-  if es and #es > 0 then
-    -- good download: keep it as the offline cache and use it
-    os.rename(TMP_FILE, CACHE_FILE)
-    use(es)
-  else
-    -- no network, or the download wasn't a valid catalog
-    os.remove(TMP_FILE)
-    if #entries == 0 then
-      -- nothing cached either (fresh install): try maiden's saved catalogs
-      local fallback = load_maiden_catalogs()
-      if fallback then
-        use(fallback, true)
-      else
-        status = "offline"
-      end
-    else
-      -- keep showing the cached catalog loaded in init()
-      status = "offline"
-    end
-  end
-  redraw()
+local function dates_wanted()
+  if not settings.dates_on then return false end
+  if not dates then return true end
+  return os.time() - settings.dates_fetched > DATES_MAX_AGE
 end
 
--- start downloading the catalog. curl saves it to TMP_FILE; -f makes curl
--- fail on http errors, and --max-time stops it hanging without network.
+-- called when the downloads finish. `output` is whatever the commands
+-- printed; each curl prints a marker only if it succeeded.
+local function finish_download(output)
+  output = output or ""
+
+  if output:find("ZZUP_DATES_OK", 1, true) then
+    local d = decode_dates(read_file(DATA_DIR .. "dates.download"))
+    if d then
+      os.rename(DATA_DIR .. "dates.download", DATES_CACHE)
+      dates = d
+      settings.dates_fetched = os.time()
+    end
+  end
+  os.remove(DATA_DIR .. "dates.download")
+
+  local es = nil
+  if output:find("ZZUP_CATALOG_OK", 1, true) then
+    es = decode_catalog(read_file(DATA_DIR .. "catalog.download"))
+    if es then os.rename(DATA_DIR .. "catalog.download", CATALOG_CACHE) end
+  end
+  os.remove(DATA_DIR .. "catalog.download")
+
+  offline = (es == nil)
+  if not es then
+    -- no network: keep the cached catalog, or fall back to maiden's copy
+    es = (#catalog > 0 and catalog) or load_maiden_catalogs()
+  end
+  if es then use_catalog(es) end
+  check_installed()
+end
+
+-- download the catalog, and dates.json if it's due, in the background
 local function fetch()
-  if fetching then return end
-  fetching = true
-  status = "checking..."
+  busy = "loading"
   redraw()
-  local cmd = "curl -fsSL --max-time 30 -o '" .. TMP_FILE .. "' '" ..
-    CATALOG_URL .. "' && echo ZZUP_OK"
+  local function curl(url, file, marker)
+    return "curl -fsSL --connect-timeout 10 --max-time 30 -o " .. shq(DATA_DIR .. file) ..
+      " " .. shq(url) .. " && echo " .. marker
+  end
+  local cmd = curl(CATALOG_URL, "catalog.download", "ZZUP_CATALOG_OK")
+  if dates_wanted() then
+    cmd = cmd .. "; " .. curl(settings.dates_url, "dates.download", "ZZUP_DATES_OK")
+  end
   if norns and norns.system_cmd then
     -- runs in the background and calls finish_download when done,
     -- so the screen and controls stay responsive meanwhile
     norns.system_cmd(cmd, finish_download)
   else
     -- older norns without system_cmd: run it directly (blocks until done)
-    finish_download(util.os_capture(cmd))
+    finish_download(util.os_capture(cmd, true))
   end
 end
 
@@ -540,10 +784,9 @@ local function wrap(text, width)
   return lines
 end
 
--- the date column in the list: YY-MM-DD, "--" for baseline, "??" if unknown
+-- the date column: YY-MM-DD, or blank
 local function short_date(d)
-  if d == "" then return "  --" end
-  if d == "?" then return "  ??" end
+  if not d then return "" end
   return d:sub(3)
 end
 
@@ -569,11 +812,11 @@ end
 
 -- opening screen: what the script does. the catalog downloads in the
 -- background while this is showing, so the list is ready on K3.
-local INTRO = "shows which scripts in the norns community catalog " ..
-  "are new to this norns, and the date it first saw each one."
+local INTRO = "shows which norns community scripts are new to you, " ..
+  "and which of your installed scripts have updates."
 
 local function draw_intro()
-  draw_header("zzup", status)
+  draw_header("zzup", busy)
   screen.level(10)
   local lines = wrap(INTRO, W - 2)
   for i = 1, math.min(#lines, 5) do
@@ -585,29 +828,32 @@ local function draw_intro()
   screen.text("K3 continue")
 end
 
--- the main list: date seen on the left, script name on the right.
--- the selected row gets a highlight bar; the newest batch is brighter.
--- the title shows the filter and count, plus "-*" while installed
--- scripts are hidden.
+-- the main list. each row: new mark, install mark, date added, name.
+-- the header shows the sort order, the row count ("-*" while installed
+-- scripts are hidden) and, on the right, what's busy or the counts of
+-- new scripts and updates.
 local function draw_list()
-  local title = (filter == "new" and "new" or "all") .. " " .. #list
-  if hide_installed then title = title .. " -*" end
-  draw_header(title, status)
+  local title = settings.sort .. " " .. #list .. (settings.hide_installed and " -*" or "")
+  local right = busy
+  if right == "" then
+    local parts = {}
+    if offline then parts[#parts + 1] = "offline" end
+    if counts.new > 0 then parts[#parts + 1] = "+" .. counts.new end
+    if counts.upd > 0 then parts[#parts + 1] = "!" .. counts.upd end
+    right = table.concat(parts, " ")
+  end
+  draw_header(title, right)
 
   -- nothing to list: explain why
   if #list == 0 then
     screen.level(6)
     screen.move(0, 30)
-    if fetching then
+    if busy ~= "" then
       screen.text("loading...")
-    elseif seen then
-      screen.text("nothing new since " .. (meta.baseline or "?"))
+    elseif #entries > 0 then
+      screen.text("everything is installed")
       screen.move(0, 42)
-      screen.text("K2: show all")
-      if hide_installed then
-        screen.move(0, 52)
-        screen.text("hold K2: show installed")
-      end
+      screen.text("K2: show installed")
     else
       screen.text("no catalog yet")
       screen.move(0, 42)
@@ -621,46 +867,71 @@ local function draw_list()
   if cursor >= top + ROWS then top = cursor - ROWS + 1 end
 
   for i = 0, ROWS - 1 do
-    local idx = top + i
-    local e = list[idx]
+    local e = list[top + i]
     if not e then break end
     local y = 20 + i * ROW_H
-    local sel = idx == cursor
+    local sel = (top + i) == cursor
     if sel then
       screen.level(2)
       screen.rect(0, y - 7, W, 9)
       screen.fill()
     end
-    local bright = rank(e) == 2 and e._seen == latest
+    -- new scripts and available updates are brighter than the rest
+    local bright = e._new or e._mark:sub(1, 1) == "!"
     screen.level(sel and 15 or (bright and 12 or 5))
-    screen.move(1, y)
-    screen.text(short_date(e._seen))
-    screen.move(38, y)
-    -- "*" marks scripts that are already installed
-    local name = e.project_name .. (e._inst and " *" or "")
-    screen.text(fit(name, W - 39))
+    if e._new then screen.move(X_NEW, y); screen.text("+") end
+    if e._mark ~= "" then screen.move(X_MARK, y); screen.text(e._mark) end
+    screen.move(X_DATE, y)
+    screen.text(short_date(e._added))
+    screen.move(X_NAME, y)
+    screen.text(fit(e.project_name, W - X_NAME))
   end
 end
+
+-- what a row's install mark means, in words
+local MARK_TEXT = {
+  ["*"] = "installed, up to date",
+  ["!"] = "update available",
+  ["m"] = "installed, modified locally",
+  ["!m"] = "update available, and modified locally: updating could lose your changes",
+  ["?"] = "installed, but can't check for updates",
+}
 
 -- prepare the detail screen for entry `e`: each line is { text, brightness }
 local function build_detail(e)
   detail_lines = {}
   local function add(s, lvl) detail_lines[#detail_lines + 1] = { s, lvl } end
-  local d = e._seen
-  if d == "" then d = "installed before " .. (meta.baseline or "tracking")
-  elseif d == "?" then d = "unknown (clock not set)"
-  elseif first_scan[e.project_name] then d = d .. " (first scan)" end
-  add("seen: " .. d, 10)
+  local function add_wrapped(s, lvl)
+    for _, l in ipairs(wrap(s, W - 2)) do add(l, lvl) end
+  end
+
+  if e._local then
+    add_wrapped(e._removed and "installed, but no longer in the catalog"
+      or "local only: not in the catalog", 10)
+    add("folder: " .. e._folder, 6)
+    detail_top = 1
+    return
+  end
+
+  if e._new then add("new to you", 15) end
+  if e._mark == "~" then
+    add_wrapped("you have a '" .. e._folder .. "' folder from a different repo", 10)
+  elseif MARK_TEXT[e._mark] then
+    add_wrapped(MARK_TEXT[e._mark], 10)
+  end
+  if e._added == BULK_IMPORT_DATE then
+    add("added: 2019 or earlier", 6)
+  elseif e._added then
+    add("added: " .. e._added, 6)
+  end
+  if e._updated then add("updated: " .. e._updated, 6) end
   if e.author then add("by " .. clean(e.author), 6) end
-  if e._inst then add("installed", 6) end
   -- most entries use "tags"; a few older ones use "tag"
   local tags = e.tags or e.tag
   if type(tags) == "table" and #tags > 0 then
-    for _, l in ipairs(wrap("#" .. table.concat(tags, " #"), W - 2)) do add(l, 3) end
+    add_wrapped("#" .. table.concat(tags, " #"), 3)
   end
-  if e.description then
-    for _, l in ipairs(wrap(clean(e.description), W - 2)) do add(l, 15) end
-  end
+  if e.description then add_wrapped(clean(e.description), 15) end
   detail_top = 1
 end
 
@@ -704,62 +975,28 @@ function enc(n, d)
       local max_top = math.max(#detail_lines - ROWS + 1, 1)
       detail_top = util.clamp(detail_top + d, 1, max_top)
     end
-  else
-    -- E2 moves one row, E3 moves a page
-    if #list == 0 then return end
-    local step = (n == 3) and ROWS or 1
-    if n == 2 or n == 3 then
-      cursor = util.clamp(cursor + d * step, 1, #list)
+  elseif n == 1 then
+    -- E1 steps through the sort orders
+    local i = 1
+    for k, s in ipairs(SORTS) do if s == settings.sort then i = k end end
+    i = util.clamp(i + (d > 0 and 1 or -1), 1, #SORTS)
+    if SORTS[i] ~= settings.sort then
+      settings.sort = SORTS[i]
+      rebuild()
+      cursor, top = 1, 1
+      save_state()
     end
+  elseif #list > 0 then
+    -- E2 moves one row, E3 moves a page
+    local step = (n == 3) and ROWS or 1
+    cursor = util.clamp(cursor + d * step, 1, #list)
   end
   redraw()
-end
-
--- K2 short press in the list: toggle between "new" and "all"
-local function toggle_filter()
-  filter = (filter == "new") and "all" or "new"
-  cursor, top = 1, 1
-  rebuild()
-end
-
--- K2 long press in the list: hide or show installed scripts.
--- the choice is saved so it's still in effect next time.
-local function toggle_installed()
-  hide_installed = not hide_installed
-  cursor, top = 1, 1
-  rebuild()
-  status = hide_installed and "* hidden" or "* shown"
-  if seen then save_seen() end
 end
 
 -- keys: n is which key (1-3), z is 1 on press and 0 on release.
 -- K1 is left alone; norns uses it for the system menu.
 function key(n, z)
-  -- K2 in the list tells a short press from a long one. pressing starts
-  -- a timer; if K2 is still down when it runs out, that's a long press
-  -- and it acts right away, so you see the change without letting go.
-  -- releasing before then cancels the timer and counts as a short press.
-  if n == 2 and view == "list" then
-    if z == 1 then
-      k2_down, k2_long = true, false
-      k2_clock = clock.run(function()
-        clock.sleep(HOLD_TIME)
-        k2_clock = nil
-        k2_long = true
-        toggle_installed()
-        redraw()
-      end)
-    elseif k2_down then
-      k2_down = false
-      if k2_clock then clock.cancel(k2_clock); k2_clock = nil end
-      if not k2_long then
-        toggle_filter()
-        redraw()
-      end
-    end
-    return
-  end
-
   if z ~= 1 then return end
   if view == "intro" then
     -- K2 or K3 leaves the opening screen
@@ -768,14 +1005,53 @@ function key(n, z)
     -- K2 goes back to the list
     if n == 2 then view = "list" end
   else
-    -- (K2 in the list is handled above)
-    if n == 3 and list[cursor] then
-      -- K3 opens details for the selected script
-      build_detail(list[cursor])
+    if n == 2 then
+      -- K2 hides or shows installed scripts
+      settings.hide_installed = not settings.hide_installed
+      rebuild()
+      top = 1
+      save_state()
+    elseif n == 3 and list[cursor] then
+      -- K3 opens details. looking at a script means it's no longer new.
+      local e = list[cursor]
+      build_detail(e)
       view = "detail"
+      if newmark[e.project_name] then
+        newmark[e.project_name] = nil
+        save_state()
+        rebuild()  -- the cursor stays on this script
+      end
     end
   end
   redraw()
+end
+
+--------------------------------------------------------------------------
+-- settings in the norns PARAMS menu
+--------------------------------------------------------------------------
+
+local function add_params()
+  params:add_separator("zzup")
+  params:add_option("zzup_dates", "dates.json", { "on", "off" }, settings.dates_on and 1 or 2)
+  params:set_action("zzup_dates", function(v)
+    settings.dates_on = (v == 1)
+    if not settings.dates_on then dates = nil end
+    settings.dates_fetched = 0
+    save_state()
+  end)
+  -- text settings need a newer norns; without them the address can still
+  -- be changed on the "# dates_url" line in dust/data/zzup/state.tsv
+  if params.add_text then
+    params:add_text("zzup_dates_url", "dates url", settings.dates_url)
+    params:set_action("zzup_dates_url", function(v)
+      if v == nil or v == "" then v = DEFAULT_DATES_URL end
+      if v ~= settings.dates_url then
+        settings.dates_url = v
+        settings.dates_fetched = 0  -- download from the new address next time
+        save_state()
+      end
+    end)
+  end
 end
 
 --------------------------------------------------------------------------
@@ -785,19 +1061,25 @@ end
 
 function init()
   util.make_dir(DATA_DIR)
-  seen = load_seen()
-  hide_installed = meta.hide_installed == "1"  -- restore the saved setting
-  -- load the cached catalog first so the list is ready even if the
-  -- network is slow or down, then refresh it from the network
-  local cached = decode_catalog(read_file(CACHE_FILE))
-  if cached and seen then
-    entries = cached
-    rebuild(true)
+  if not load_state() then import_v1() end
+  -- an unknown saved sort order falls back to "status"
+  local known = false
+  for _, s in ipairs(SORTS) do if s == settings.sort then known = true end end
+  if not known then settings.sort = "status" end
+  add_params()
+
+  -- show the cached data straight away, then refresh from the network
+  if settings.dates_on then dates = decode_dates(read_file(DATES_CACHE)) end
+  local cached = decode_catalog(read_file(CATALOG_CACHE))
+  if cached then
+    catalog = cached
+    scan_folders()
+    assemble()
+    rebuild()
   end
   fetch()
 end
 
 function cleanup()
-  if k2_clock then clock.cancel(k2_clock) end
-  if seen then save_seen() end
+  save_state()
 end

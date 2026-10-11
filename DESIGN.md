@@ -2,7 +2,9 @@
 
 zzup shows which norns community catalog scripts are new to you, and which of your installed scripts have updates available.
 
-This document is the agreed design for v2. The current release (v1.2) tracks first-seen dates locally only.
+This document is the design for v2, implemented in zzup v2.0. (v1 tracked first-seen dates locally only.)
+
+Two details settled during implementation: with no `dates.json`, scripts already in the catalog on zzup's first run show no date, rather than the first-run date; and a fork shows `~` on the catalog entry itself, with an explanation in its details, rather than as a separate row.
 
 ## data
 
