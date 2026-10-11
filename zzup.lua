@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.5 @billwolf
+-- v2.6 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -71,7 +71,7 @@ local SORTS = { "status", "added", "a-z", "updated", "author" }
 -- how each sort order is named in the header ("sort: status, date")
 local SORT_LABELS = {
   ["status"] = "status, date",
-  ["added"] = "added",
+  ["added"] = "date added",
   ["a-z"] = "a-z",
   ["updated"] = "update date",
   ["author"] = "author",
