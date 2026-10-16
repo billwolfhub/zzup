@@ -9,7 +9,7 @@
 -- K2 hide installed
 -- K3 details
 --
--- v2.8 @billwolf
+-- v2.9 @billwolf
 
 --------------------------------------------------------------------------
 -- overview
@@ -1140,15 +1140,10 @@ function key(n, z)
       top = 1
       save_state()
     elseif n == 3 and list[cursor] and not list[cursor]._heading then
-      -- K3 opens details. looking at a script means it's no longer new.
-      local e = list[cursor]
-      build_detail(e)
+      -- K3 opens details. a script stays new until NEW_EXPIRY_DAYS pass,
+      -- since you may look at it long before you get around to trying it.
+      build_detail(list[cursor])
       view = "detail"
-      if newmark[e.project_name] then
-        newmark[e.project_name] = nil
-        save_state()
-        rebuild()  -- the cursor stays on this script
-      end
     end
   end
   redraw()

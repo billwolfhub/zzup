@@ -75,7 +75,7 @@ The sort order and the hide setting are remembered between runs.
 
 - **First run:** scripts added to the catalog in the last 30 days.
 - **After that:** anything added since your last visit.
-- A script stops being new once you open its details, or two weeks after it was marked, whichever comes first.
+- A script stays new for two weeks after it was marked, even if you open its details, so you have time to get around to trying it.
 - Updates never make a script new again. A script that's been updated 20 times since you last looked is still just new to you once.
 
 ## where the information comes from

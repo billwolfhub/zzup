@@ -46,7 +46,7 @@ Each row has two indicator columns before the date.
 | `+` | added to the catalog since your last visit |
 
 - On the first run, "new" means added in the last 30 days.
-- A script stops being new when you open its details, or two weeks after it was first marked, whichever comes first.
+- A script stays new for two weeks after it was first marked. Opening its details doesn't clear it, since you may look at a script long before you try it.
 - Updates never make a script "new" again.
 
 **Column 2: on this norns**
