@@ -30,7 +30,7 @@ To start over completely (forget what you've seen, and reset settings), also del
 
 ## the list
 
-Every script in the catalog is listed, plus any local scripts you have. Each row shows two marks, how long ago the script was added to the catalog, and its name:
+Every script in the catalog is listed, plus any local scripts you have. Each row shows a new mark, a status indicator, how long ago the script was added to the catalog, and its name:
 
 ```
 +  11d vinker
@@ -41,11 +41,11 @@ Every script in the catalog is listed, plus any local scripts you have. Each row
 
 Ages are days (`11d`), then weeks (`3w`), months (`4mo`) and years (`6y`). The details screen (K3) shows full dates. A long name on the selected row scrolls so you can read all of it. Scrolling relies on the norns clock; on some norns the clock doesn't run after a fresh start until a clock-based script (awake, for example) has been opened, and until then long names just end in `..`.
 
-**First column**
+**New**
 
 - `+` new to you: added to the catalog since your last visit
 
-**Second column**
+**Status indicator**
 
 - `*` installed, up to date
 - `!` update available: a newer version has been published
@@ -59,11 +59,11 @@ The header shows the sort order (for example `sort: status, date`), the number o
 
 ## controls
 
-- **E1:** sort order: status, date added, A–Z, update date, author. The header shows the current one, e.g. `sort: status, date`. Turn left past "status" for the **key**, a one-screen reference of the main marks (E1 right or K2 returns to the list). The key leaves out `?` and the header's `-*`, which are described above.
+- **E1:** sort order: status, date added, A–Z, update date, author. The header shows the current one, e.g. `sort: status, date`. Turn left past "status" for the **key**, a one-screen reference of the main status indicators (E1 right or K2 returns to the list). The key leaves out `?` and the header's `-*`, which are described above.
 - **E2 / E3:** scroll by row / page
 - **K2:** hide or show installed scripts, including your local ones. The header shows `-*` while they're hidden.
-- **K3:** details: dates, author, tags, description, and what the marks mean
-- **K2 in details:** back to the list
+- **K3:** details: dates, author, tags, description, and what its status indicator means
+- **K2 in details or the key:** back to the list
 
 **Status** order (the default) puts updates and modified scripts first, then scripts new to you, then everything else, newest first.
 
@@ -97,6 +97,7 @@ In the norns PARAMS menu:
 
 - **"Added" means added to the catalog,** which is usually close to when a script was first published. The 57 scripts added in the catalog's 2019 bulk import show "2019 or earlier".
 - **"Updated" counts any commit,** including README edits.
+- **Before "update all" in maiden:** git installs with local edits (`m`, `!m`) will most likely fail to update rather than lose changes, but non-git installs (`?`) are deleted and reinstalled, so any edits to those are lost.
 - **Data location:** zzup keeps its data in `dust/data/zzup/`. `state.tsv` is your record and settings (plain text); the rest are cached downloads. Delete the folder to start over.
 
 ## license
